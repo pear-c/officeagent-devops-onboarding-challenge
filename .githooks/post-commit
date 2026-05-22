@@ -1,0 +1,42 @@
+# Retrobot post-commit hook
+# 커밋 후 AI 에이전트를 호출하여 자동 회고를 생성합니다.
+
+# Retrobot이 만든 커밋에서 다시 트리거되지 않도록 방지 (무한 루프 차단)
+LAST_MSG=$(git log -1 --pretty=%s 2>/dev/null)
+if echo "$LAST_MSG" | grep -q "Retrobot"; then
+    exit 0
+fi
+
+SKILL_PATH="retrobot/SKILL.md"
+
+if [ ! -f "$SKILL_PATH" ]; then
+    exit 0
+fi
+
+echo "🤖 Retrobot: 회고 생성 중..."
+
+# AI 에이전트로 스킬 실행 — Claude Code 권장. 없으면 Codex → Gemini 순으로 폴백.
+# 에이전트별 컨버팅 상세는 docs/AGENT_SETUP.md 참조.
+if command -v claude >/dev/null 2>&1; then
+    # Claude Code (권장): SKILL.md를 그대로 전달
+    claude -p "$(cat $SKILL_PATH)" --allowedTools 'Bash(command)' 'Read(file_path)' 'Write(file_path,content)' 'Glob(pattern)' 'Grep(pattern)' 2>/dev/null
+elif command -v codex >/dev/null 2>&1; then
+    # Codex: SKILL.md를 stdin 파이프로 전달 (argv 방식은 stdin EOF stuck 위험)
+    cat "$SKILL_PATH" | codex exec --sandbox workspace-write 2>/dev/null
+elif command -v gemini >/dev/null 2>&1; then
+    # Gemini CLI: SKILL.md를 프롬프트로 전달
+    gemini -p "$(cat $SKILL_PATH)" 2>/dev/null
+else
+    echo "ℹ Retrobot: claude / codex / gemini CLI 중 하나도 설치되어 있지 않습니다. 건너뜁니다."
+    echo "  수동 회고: retros/YYYY-MM-DD.md 를 직접 작성하셔도 평가는 동일합니다."
+    exit 0
+fi
+
+# 회고 파일이 생성/변경되었으면 자동 커밋
+if [ -n "$(git status --porcelain retros/)" ]; then
+    git add retros/
+    git commit -m "docs(retro): 자동 회고 생성 by Retrobot" --no-verify
+    echo "✅ Retrobot: 회고가 커밋되었습니다."
+else
+    echo "ℹ Retrobot: 새로운 회고 없음"
+fi
