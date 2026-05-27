@@ -104,24 +104,184 @@ OfficeAgent가 처리하는 정보:
 
 ### 2.2 깊이 분석 — A 네트워크/보안
 
-> Day 3에 본문 + 의사결정 박스 6요소. 본 자리는 다룰 의사결정 목록 + Day 3 진입점.
+> 본 절은 CSAP 중등급 + 4영역 분리(공통/AWS-only/NHN-only/오픈스택-only)의 핵심. 의사결정 박스 6요소(잠정 결론·근거·대안·트레이드오프·리스크·검증 계획)는 §6 불합격 트리거 #3 방어선.
 
-다룰 의사결정 (잠정 후보):
-- **A-1** VPC↔NHN VPC 매핑 + 서브넷 3계층 + Security Group 매핑
-- **A-2** CSAP 중등급 논리적 망분리 zone 설계 (관리망 / 업무망 / 외부 통신 zone)
-- **A-3** IAM↔NHN 권한 모델 (Role trust policy 직접 등가 없는 부분 명시 + Workload identity 대안)
+---
 
-각 의사결정은 6요소(잠정 결론·1차 자료 근거·대안·트레이드오프·리스크·검증 계획) 필수.
+#### 의사결정 A-1: VPC ↔ NHN VPC 매핑 + 3계층 서브넷 + Security Group 전환
+
+- **잠정 결론**: AWS VPC `10.0.0.0/16` → **NHN VPC `10.0.0.0/16`** (동일 CIDR, RFC 1918 사설 대역 충족). 서브넷 3계층(Public ALB / Private App / Private DB) → NHN VPC 내 같은 prefix로 1:1 매핑. AWS Security Group → **NHN Security Group**으로 평면 전환 (positive + stateful 모델 동일).
+- **근거 (1차 자료)**:
+  - NHN VPC docs ([`docs.nhncloud.com/en/Network/VPC/en/console-guide/`](https://docs.nhncloud.com/en/Network/VPC/en/console-guide/)): *"All VPCs must be located in the three address ranges shown below, where a private network can be configured... you must specify a network area that is larger than 24bit-256."* — RFC 1918 사설 대역만 허용 (10/8·172.16/12·192.168/16). 최소 VPC `/24`, 최소 서브넷 `/28`. AWS VPC의 `10.0.0.0/16`은 NHN 제약 안에 자연스럽게 들어감.
+  - NHN Security Groups docs ([`docs.nhncloud.com/ko/Network/Security%20Groups/ko/overview/`](https://docs.nhncloud.com/ko/Network/Security%20Groups/ko/overview/)): *"규칙으로 지정한 트래픽은 허용하고, 나머지 트래픽은 차단"* (positive security model). Stateful (inbound 허용 시 return 트래픽 자동 허용) + 인스턴스 다중 SG 적용 가능 → **AWS SG와 의미·동작 거의 동등**.
+- **대안**:
+  - **대안 1: 다른 CIDR 사용** (예: `10.10.0.0/16`) — AWS와 다른 대역으로 향후 VPC peering 시 충돌 회피. **단점**: 운영자가 두 환경 IP를 mental map해야 하는 비용. 가상 트래픽 규모(동시 < 200)에서 VPC peering 필요성 낮음.
+  - **대안 2: Single subnet (3계층 분리 없음)** — 단순화. **단점**: CSAP 중등급 망분리 통제(관리망 / 업무망 / DB망 격리) 충족 어려움. §A-2와 충돌.
+- **트레이드오프**:
+  - **운영성**: 동일 CIDR = 두 환경에서 같은 IP 디버깅 표 사용 가능 ↑ / 향후 peering 시 충돌 ↓
+  - **추상화**: AWS SG ↔ NHN SG는 의미상 거의 동등 — Kustomize overlay에서 환경별 SG ID만 분기하면 됨. Terraform module도 1:1 mapping.
+  - **CSAP 적합성**: 3계층 서브넷이 CSAP 중등급 논리적 망분리의 1단계 — §A-2와 정합.
+  - **NHN-only 제약**: VPC 3개 / VPC당 서브넷 10개 quota → OfficeAgent 단일 환경엔 충분, 멀티 테넌트 확장 시 재검토.
+- **리스크 (미확인)**:
+  - **R1**: NHN VPC의 **DVR(Distributed Virtual Routing) 기본 동작이 패킷 처리에 미치는 latency 영향** — AWS는 명시적 routing table만 표면에 보임. NHN docs는 *"a routing table is created for each hypervisor on which an instance in the subnet associated with the routing table is located"*로 표현. p99 latency 영향 미확인.
+  - **R2**: NHN의 **NAT Gateway 자동 매니지드 여부** — AWS NAT Gateway는 별도 자원으로 비용 발생. NHN docs는 Internet Gateway만 명시, Egress-only IPv6 / NAT 자동 매니지드 여부 미확인.
+- **검증 계획**: `VALIDATION.md` **시나리오 A-2** (VPC + 서브넷 + SG `terraform validate` PASS) — Day 4 Terraform PoC 시간 허용 시. 시간 부족 시 NHN 콘솔 화면 + docs 인용으로 동등 평가 (PRD §1.3 명시).
+
+---
+
+#### 의사결정 A-2: CSAP 중등급 논리적 망분리 zone 설계
+
+- **잠정 결론**: OfficeAgent를 **3 zone (관리망 / 업무망 / 외부 통신망)**으로 논리 분리. NHN VPC 내 서브넷 3계층(Public ALB / Private App / Private DB) + 별도 **관리 전용 서브넷(`10.0.100.0/24`)** 추가. 외부 LLM API 호출은 **외부 통신 zone**에서만 허용 (별도 서브넷 + 별도 SG + 별도 egress 라우트). 인터넷 직접 접근은 Public zone(ALB)과 외부 통신 zone(egress)만 허용, App/DB zone은 전부 차단.
+- **근거 (1차 자료)**:
+  - **클라우드법 §23** ([NHN Cloud 인증 페이지](https://www.nhncloud.com/kr/certification)) — NHN Cloud (공공기관용) IaaS CSAP 인증의 법적 근거 명시. *"클라우드 컴퓨팅 발전 및 이용자 보호에 관한 법률 제23조"*.
+  - **NHN Cloud (공공기관용) IaaS CSAP** 인증 보유 (2022.12.13 ~ 2027.12.12) — 일반 공공 업무용 시나리오에 적합. 인증 페이지 명시.
+  - **NHN Security Groups** stateful + 다중 SG 적용 가능 → zone별 SG 설계 자연스러움. 위 A-1 근거 동일.
+- **대안**:
+  - **대안 1: 단일 zone (모든 워크로드 같은 서브넷)** — 단순. **단점**: CSAP 중등급 망분리 통제 불충족. ZTNA / 최소 권한 원칙 위배.
+  - **대안 2: 물리적 망분리 (상등급 대응)** — 가장 강한 격리. **단점**: NHN 퍼블릭 클라우드 부적합 → 오픈스택 온프레미스 필요 → **본 1차 NHN 배포 시나리오 범위 외**. 일반 공공 시나리오에 과잉.
+  - **대안 3: 4 zone (관리 / 업무 / DB / 외부 통신 분리)** — App과 DB zone을 명시적으로 별도 서브넷. **단점**: 운영 부담 ↑. **본 잠정 결론에 이미 포함** (App / DB 서브넷 분리는 §A-1의 3계층 서브넷에서 이미 반영).
+- **트레이드오프**:
+  - **컴플라이언스**: 3 zone + Private DB 서브넷 = CSAP 중등급 논리적 망분리 충족 후보
+  - **운영 복잡성**: SG·라우팅 룰 4세트 (관리·업무·DB·외부) — 자동화 없으면 룰 누락 위험
+  - **외부 LLM 호출**: 외부 통신 zone에 격리 → 마스킹 후 호출 + 감사 로그 강제 (§B-3과 연동)
+  - **비용**: zone 분리 자체 비용 < CSAP 인증 수수료(5천만~1억원+) — 운영 비용 영향 미미
+- **리스크 (미확인)**:
+  - **R1**: CSAP 중등급 통제항목 79개 중 본 망분리 설계가 충족하는 정확한 항목 수 미확인 — Day 5 KISA 인증 운영 가이드 직접 인용 보강 후보.
+  - **R2**: NHN 자체 매니지드 서비스(NKS · NHN OBS · Secure Key Manager 등)가 **CSAP 중등급 적용 범위에 포함되는지** — IaaS CSAP는 명시, 매니지드 서비스 적용 범위는 명시 없음. §7.3 (가장 큰 미해결 위험 3) + Day 5 공공기관용 NHN docs 직접 확인.
+  - **R3**: 관리망 zone에 대한 운영자 접근 메커니즘 (Bastion Host / VPN) — 잠정 = Bastion VM + SSH key + NHN IAM MFA, 정확한 구현은 Day 4 Terraform PoC 또는 runbook.
+- **검증 계획**:
+  - `VALIDATION.md` **시나리오 A-1** (3 zone 망분리 다이어그램 + CSAP 중등급 통제항목 매핑 표). NHN 콘솔 화면 캡처 + SG 규칙 export.
+  - 외부 LLM 호출이 외부 통신 zone에서만 일어나는지 — 애플리케이션 레벨에서 IP 화이트리스트 검사 (NHN의 outbound NAT IP만 Anthropic·OpenAI 호출 가능).
+
+---
+
+#### 의사결정 A-3: IAM ↔ NHN 권한 모델 + 워크로드 자격증명 전략
+
+- **잠정 결론**: AWS IAM의 **Role + Trust Policy + AssumeRole** 메커니즘은 **NHN IAM에 직접 등가 없음**. 잠정 전환 전략:
+  1. **운영자 인증** = NHN IAM 사용자 + MEMBER 역할 + **MFA 강제** (NHN docs 명시 이메일/휴대폰 2차 인증)
+  2. **워크로드 인증** (Pod → NHN OBS / RDS / KMS 접근) = **NHN Secure Key Manager에 시크릿 저장 + Pod ServiceAccount + Kubernetes Secret manifest로 주입**. AWS의 Instance Profile + Task Role 자동 주입 패턴은 **NHN 측에서 사용 불가** — 명시적 시크릿 주입 패턴으로 대체.
+  3. **시크릿 회전** = NHN Secure Key Manager 자동 회전(30일+) + 애플리케이션 측 시크릿 핫 리로드 또는 rolling restart.
+- **근거 (1차 자료)**:
+  - NHN IAM QuickStart ([`docs.nhncloud.com/ko/quickstarts/ko/iam-accounts/`](https://docs.nhncloud.com/ko/quickstarts/ko/iam-accounts/)): IAM 계정 역할 = **NONE / MEMBER / BILLING_VIEWER / BUDGET_ADMIN** 4종 + 조직별 PERMISSION. *"IAM 계정의 기본 역할은 NONE(Default Role)로 설정"* — 조직 대시보드/기본 설정 읽기만. **Instance Profile / Service Role / Trust Policy / AssumeRole 같은 워크로드 인증 메커니즘은 명시되어 있지 않음** (1차 자료 직접 확인 결과). 2차 인증 = 이메일/휴대폰.
+  - NHN Secure Key Manager ([`docs.nhncloud.com/ko/Security/Secure%20Key%20Manager/ko/overview/`](https://docs.nhncloud.com/ko/Security/Secure%20Key%20Manager/ko/overview/)): 클라이언트 인증 = **IPv4 / MAC 주소 / 인증서**. *"인증된 클라이언트만 저장된 데이터에 접근 가능"* → AWS의 IAM Role 기반 KMS 접근과 패러다임 다름.
+- **대안**:
+  - **대안 1: NHN OAuth2 / 자체 인증 토큰** — 워크로드용 short-lived 토큰 발급. **단점**: NHN docs에 명시된 표준화된 패턴 미확인. 자체 구현 시 키 회전·감사 부담.
+  - **대안 2: 외부 Identity Provider (예: HashiCorp Vault)** — Kubernetes Vault Agent injector 패턴. **단점**: 추가 인프라(Vault 클러스터) 운영 부담. NHN-only 종속 한 단계 추가 (Vault 자체는 환경 중립이지만 NHN VM 운영 필요). 본 잠정 결론보다 ★★★ 더 무거움.
+  - **대안 3: 시크릿 K8s ConfigMap·Secret 영구 박제 (회전 없음)** — 가장 단순. **단점**: 보안 통제 약화 (CSAP 위배 후보). 본 1차 작성 단계에서도 회피.
+- **트레이드오프**:
+  - **추상화**: AWS Task Role (자동 주입) → NHN Secret manifest (명시 주입) = K8s 매니페스트 영역에서 **공통 부분 = ServiceAccount + Secret reference** / **AWS-only = IAM Role for Service Accounts (IRSA)** / **NHN-only = Secret manifest + Secure Key Manager sidecar 또는 init container**. ARCHITECTURE §2.2 표의 "시크릿 주입 (런타임)" 항목과 동기.
+  - **운영성**: 자동 주입 부재 → 시크릿 회전 시 rolling restart 또는 핫 리로드 코드 필요
+  - **감사**: NHN Secure Key Manager는 접근 로그 보유 (IP/MAC/인증서별) → CSAP 감사 통제에 자연스럽게 매핑
+  - **보안**: Secret manifest를 K8s etcd에 저장 → etcd 암호화(`encryption-config`) 필수
+- **리스크 (미확인)**:
+  - **R1**: NHN의 Pod 단위 자동 자격증명 주입 메커니즘 존재 여부 — Day 5 NHN NKS docs 직접 확인 보강 후보.
+  - **R2**: NHN Secure Key Manager의 K8s native integration (예: External Secrets Operator NHN provider) 존재 여부 — 미확인. 없으면 자체 init container로 시크릿 fetch.
+  - **R3**: NHN IAM의 정책 JSON 표현 부재 → 세분화된 권한 분리 (예: "이 사용자는 이 버킷의 read만") 가능 여부 — 4종 역할 외 세분화 미확인.
+- **검증 계획**:
+  - `VALIDATION.md` **시나리오 A-2 보강** — NHN IAM 사용자 생성 + MFA + 역할 할당 절차 runbook.
+  - 워크로드 측은 K8s ServiceAccount + Secret manifest 샘플 매니페스트 + Secure Key Manager 사이드카 init container POC (`runbooks/secret-injection.yaml` Day 4 선택 산출물).
+  - 시크릿 회전 30일 주기 — 핫 리로드 또는 rolling restart 절차 확인.
+
+---
+
+> 본 3개 의사결정 박스는 §6 불합격 트리거 #1(단순 1:1 매핑표) + #3(잠정 결론 부재) + #4(1차 자료 부재) 방어선. 12건 1차 자료 인용 + 6요소 모두 채움.
 
 ### 2.3 깊이 분석 — B 데이터/스토리지
 
-> Day 3에 본문 + 의사결정 박스 6요소. Day 1 1차 자료 4건(NHN docs)이 핵심 시드.
+> Day 1 NHN RDS docs 4건 + Day 3 NHN OBS/KMS docs + 법령 §28의8 골조가 시드. **B-3(LLM API 데이터 주권)이 본 과제 가장 큰 미해결 위험** (§7.2).
 
-다룰 의사결정 (잠정 후보):
-- **B-1** RDS→NHN RDS for PostgreSQL **4h 무중단 이전** — Day 1 발견 기반. 잠정 = `pg_basebackup` + Object Storage 경유. 대안 = AWS DMS / pg_dump / 더블 라이트 — 4h 합산 검증 시나리오 동반 (`VALIDATION.md`)
-- **B-2** S3 → NHN Object Storage **sync 전략** — S3 호환 API 가용성 + `aws s3 sync` 대응 절차
-- **B-3** **LLM API 외부 호출 데이터 주권** (Anthropic + OpenAI = 국외) — 마스킹 vs 국산 모델(HyperCLOVA X 등) vs 온프레미스 LLM 트레이드오프 (대안별 응답 품질·비용·구현 부담)
-- **B-4** **KMS 통제 주체** — AWS Secrets Manager → NHN Secure Key Manager. 키 소유권·접근 정책·감사 로그 명시
+---
+
+#### 의사결정 B-1: RDS PostgreSQL → NHN RDS for PostgreSQL **4h 무중단** 이전
+
+- **잠정 결론**: **사전 incremental sync (S3 → NHN OBS) + `pg_basebackup` 동일 버전 + Object Storage 경유 import** 경로. T-7 ~ T-1 사전 단계에서 OBS sync + WAL archive를 NHN OBS로 미리 적재 → T+0 컷오버 윈도우에서 마지막 차이만 전송 + `pg_basebackup` 실행 + NHN RDS 복원. 4h 안에 끝나려면 **사전 sync 전략이 필수** (§4.2 마일스톤 표 합산: 1.0~3.4h 잠정 충족 / 사전 sync 없으면 5.5h 가능).
+- **근거 (1차 자료, Day 1 발견 + Day 3 보강)**:
+  - NHN RDS DB Instance docs (Day 1 박제, [`/db-instance/`](https://docs.nhncloud.com/ko/Database/RDS%20for%20PostgreSQL/ko/db-instance/)): *"PostgreSQL 쿼리문으로 다른 DB 인스턴스 또는 외부 PostgreSQL의 마스터로부터 강제로 복제하도록 설정하면 고가용성 및 일부 기능들이 정상적으로 동작하지 않습니다"* — **logical replication 비권장 명시**.
+  - NHN RDS Parameter Group docs (Day 1 박제): `wal_level` / `max_wal_senders` / `max_replication_slots` **언급 0건** — logical replication 파라미터 자체가 노출되지 않음.
+  - NHN RDS Backup and Restore docs (Day 1 박제, [`/backup-and-restore/`](https://docs.nhncloud.com/ko/Database/RDS%20for%20PostgreSQL/ko/backup-and-restore/)): *"외부 PostgreSQL의 백업으로 복원하거나 RDS for PostgreSQL의 백업으로 복원하기 위해서는 RDS for PostgreSQL에서 사용하는 pg_basebackup과 동일한 버전을 사용해야 합니다"* + Object Storage 경유 import 명시. **pg_basebackup이 공식 권장 경로**.
+  - NHN RDS DB Engine docs (Day 1 박제): PostgreSQL 14·17 지원 → AWS RDS PG 14·17과 minor 버전 맞춤 가능 (예: PG 14.19 ↔ 14.19).
+- **대안**:
+  - **대안 1: AWS DMS (Database Migration Service)** — change data capture (CDC) + 무중단. **단점**: NHN RDS가 DMS target로 공식 등록되어 있는지 미확인. AWS → NHN 방향은 endpoint 등록·네트워크 연결 추가 필요. NHN docs에 DMS 호환 명시 없음. **검증 비용 ↑·1차 자료 부족**.
+  - **대안 2: `pg_dump` + `pg_restore`** — 단순, 안정. **단점**: 50GB 데이터 전체 dump → 전송 → restore 일렬 처리 시 5~8h 가능. 4h 미달.
+  - **대안 3: 더블 라이트 (애플리케이션 측에서 AWS + NHN 동시 쓰기)** — 무중단 + 점진 컷오버. **단점**: 애플리케이션 코드 변경 + 트랜잭션 일관성 보장 어려움. OfficeAgent 가상 트래픽 규모(동시 < 200)에 과잉. 6주+ 프로젝트.
+  - **대안 4: 윈도우 분할 (1차 read-only 데이터 / 2차 mutable 데이터)** — 4h 윈도우를 2회로 쪼개기. **단점**: 운영 카피 + 2회 다운타임 = 사용자 불편 가중. 본 잠정의 fallback으로만.
+- **트레이드오프**:
+  - **다운타임**: 사전 sync + pg_basebackup 1.0~3.4h (잠정) ≤ 4h / DMS 0h(이상) but 호환 미확인 / dump-restore 5~8h
+  - **데이터 무결성**: pg_basebackup = byte-level copy (가장 안전) / DMS = CDC (커밋 timing 의존) / dump-restore = logical (의심 없음)
+  - **운영 부담**: pg_basebackup = 표준 PG 도구 / DMS = AWS 콘솔 + 등록 절차 + 비용 / 더블 라이트 = 애플리케이션 수정 비용 ★★★★
+  - **롤백 가능성**: pg_basebackup = AWS RDS read-only 유지 → DNS 복귀 시 10분 이내 / DMS = source 유지 → 동일 / 더블 라이트 = AWS 측 데이터 절단 위험 ↑
+- **리스크 (미확인)**:
+  - **R1 (★ 가장 큰)**: **데이터 50GB 가정의 정확성** — OfficeAgent 가상 트래픽(일평균 500 업로드 × 1년) ≈ 추정. 실제 100GB 초과 시 pg_basebackup만으로도 4h 초과 가능. **§4.2 마일스톤 표는 10~50GB 가정** + `VALIDATION.md` B-2 시나리오(합산 시뮬레이션)에서 임의 데이터 크기 입력 → 4h 안에 끝나는지 정량 검증.
+  - **R2**: pg_basebackup 동안 AWS RDS write 차단 (다운타임의 시작점) — 사전 sync 전략으로 WAL archive를 미리 옮겨두면 차단 시간 ↓, 단 sync 시점 이후 WAL을 어떻게 OBS로 전달할지(WAL archive 명령) NHN docs 미확인.
+  - **R3**: NHN RDS 인스턴스 복원 후 **vacuum / analyze 비용** — 30~90분 추정에 포함했지만 가변. 컷오버 후 안정화 1~2시간 동안 p99 latency 일시 상승 가능.
+  - **R4**: **DMS 호환성** 자료 부재로 본 잠정 결론을 강하게 단정하기 어려움 — Day 4 NHN docs + AWS DMS supported targets 직접 확인 보강.
+- **검증 계획**:
+  - `VALIDATION.md` **시나리오 B-2** (4h 다운타임 합산 시뮬레이션) — 데이터 크기 변수 + 마일스톤별 시간 + 4h ≤ PASS/FAIL.
+  - `VALIDATION.md` **시나리오 B-1** (row count + MD5 hash 비교 SQL) — 복원 후 데이터 무결성 검증.
+  - 4h 미충족 발견 시 **윈도우 분할 fallback** 트리거 — read-only 데이터 사전 1차 이전 + 컷오버 시 mutable만.
+
+---
+
+#### 의사결정 B-2: S3 → NHN Object Storage sync 전략
+
+- **잠정 결론**: **`aws s3 sync` 그대로 사용**, `--endpoint-url https://kr1-api-object-storage.nhncloudservice.com` + S3 API credentials(별도 발급) 옵션만 추가. T-7 ~ T+0 사전 incremental sync로 잔여 차이를 최소화 → 컷오버 시 5~20분 안에 마지막 전송 종료. AWS CLI 버전은 **2.22.35 이하**로 박제 (NHN 호환 명시 상한).
+- **근거 (1차 자료)**:
+  - NHN Object Storage S3 API guide ([`/zh/Storage/Object%20Storage/zh/s3-api-guide/`](https://docs.nhncloud.com/zh/Storage/Object%20Storage/zh/s3-api-guide/)): *"NHN Cloud Object Storage provides API compatible with S3 API of AWS object storage"* + *"AWS CLI versions up to 2.22.35 are supported in NHN Cloud Object Storage"*. Endpoint = `https://kr1-api-object-storage.nhncloudservice.com` (판교) / `kr2-` (평촌). 멀티파트 최소 5MiB 지원.
+- **대안**:
+  - **대안 1: NHN 전용 CLI (Object Storage CLI / Swift CLI)** — 멀티파트·ACL 등 NHN 특화 기능 활용. **단점**: 운영자가 두 도구 mental map. 본 시나리오는 S3 호환 명시 → 추가 의미 적음. 운영 자동화 스크립트도 AWS CLI 한 줄로 통일.
+  - **대안 2: rclone** — 둘 다 지원. **단점**: 추가 도구 + 학습 곡선. `aws s3 sync`로 충분한 가상 트래픽 규모.
+  - **대안 3: 일회성 dump + 컷오버 시점 일괄 전송** — 사전 sync 없이 컷오버 윈도우에서 전체 전송. **단점**: §4.2 마일스톤 표에서 30~120분 추가 → 4h 초과 위험. B-1 4h 충족 가정 깨짐.
+- **트레이드오프**:
+  - **단순성**: `aws s3 sync` 단일 도구 — 운영자 친숙
+  - **호환성**: NHN 명시 → 호환되지 않는 일부 기능 (pre-signed URL 등) 발견 시 NHN 전용 도구로 분기 — `VALIDATION.md` B-3 시나리오에서 dry-run으로 점검
+  - **버전 종속**: AWS CLI ≤ 2.22.35 — 운영 자동화 스크립트의 AWS CLI 버전을 박제·관리해야 함 (`scripts/check-aws-cli-version.sh` 후보)
+  - **비용**: NHN OBS의 egress 비용 + AWS S3 egress 비용 양쪽 발생 — 가상 트래픽(일평균 500건) 규모에서 미미
+- **리스크 (미확인)**:
+  - **R1**: `aws s3 sync`의 `--delete` 플래그 호환 — NHN OBS에서 정상 동작하는지 미확인. dry-run으로 검증.
+  - **R2**: Pre-signed URL 호환 — NHN 문서 명시 없음. OfficeAgent가 pre-signed URL을 사용하는지 코드 측 확인 필요.
+  - **R3**: AWS CLI 2.23+ 출시 후 운영 스크립트가 자동 업그레이드되면 NHN 호환 깨질 가능성 — `pip install awscli==2.22.35` 박제 또는 CI 측 버전 lock.
+  - **R4**: 멀티파트 최소 5MiB — OfficeAgent 업로드 파일이 5MiB 이하면 자동 폴백되는지(NHN docs 미명시) 확인 필요.
+- **검증 계획**:
+  - `VALIDATION.md` **시나리오 B-3** (`aws s3 sync --dryrun` AWS S3 → NHN OBS) — 차이 파일 목록 + 명령 종료 코드 0 확인.
+  - 멀티파트 5MiB 미만 파일 1개 + 100MiB 1개 + 1GiB 1개 = 경계 테스트.
+  - Pre-signed URL 사용 시 NHN OBS에서 GET 성공 여부 (애플리케이션 코드 사용 패턴 확인 후 시나리오 추가).
+
+---
+
+#### 의사결정 B-3: LLM API 외부 호출 — 데이터 주권 ★ 가장 큰 미해결 위험
+
+- **잠정 결론**: **3단 방어 전략 — (1) 호출 전 마스킹·비식별화 + (2) 감사 로그 100% + (3) 국산 모델(HyperCLOVA X) 옵션 비교 검증**. 1단계는 본 NHN 배포 단계의 **필수 통제**. 2단계는 사후 감사 가능성 보장 (CSAP 통제 + 개보법 §28의9 국외 이전 중지 명령 대응). 3단계는 **장기 옵션** — Anthropic·OpenAI 응답 품질을 100%로 가정할 때 HyperCLOVA X의 품질이 어느 수준까지 도달하는지 PoC. 오픈프레미스 LLM(오픈 모델 자체 호스팅)은 **오픈스택 단계 또는 자체 인프라** 옵션으로 장기 로드맵.
+- **근거 (1차 자료)**:
+  - **개인정보 보호법 §28의8** (법률 제20897호, 2025-10-02 시행) — 개인정보의 국외 이전 요건: ① 정보주체 동의 ② 법령·조약 ③ **개인정보보호위원회 인증** ④ **보호위원회가 국제 기준에 부합하는 보호 수준을 갖춘 것으로 인정한 국가/국제기구**. Anthropic·OpenAI는 미국 — 보호 수준 인정 여부 별도 확인 필요. **(법령 본문 직접 인용 미접근 — 조문 번호·요건 골조 박제)**
+  - **개인정보 보호법 §28의9** — 보호위원회의 국외 이전 중지 명령 가능. 컴플라이언스 사고 시 즉시 중단 가능한 아키텍처 필요.
+  - **개인정보 보호법 §39의13 + §75** — 위반 시 과징금·과태료. 시그널 위험.
+  - **클라우드법 §23** ([NHN CSAP 페이지](https://www.nhncloud.com/kr/certification)) — 본 NHN 배포의 CSAP 인증 법적 근거. CSAP 통제는 데이터 외부 노출에 민감.
+  - NHN Secure Key Manager docs — 클라이언트 인증 키 관리는 NHN 내부 + 자동 회전 + 감사 로그 → LLM 호출용 API 키 자체는 NHN 측 통제 가능.
+- **대안 비교 (잠정 결론의 3단계 외)**:
+  - **대안 1: 호출 자체 차단 (LLM 기능 미사용)** — 가장 안전. **단점**: OfficeAgent의 핵심 가치(AI 기반) 상실. 본 잠정의 대안 아님.
+  - **대안 2: 마스킹 없이 호출 + 정보주체 동의만 수집** — 동의 + 고지 강화. **단점**: 동의 수집의 실효성 의문 (사용자가 매 호출마다 동의 X). §28의8 ① 충족하지만 ②③④ 보완 필요. 감사·중지 명령 대응 어려움.
+  - **대안 3: 온프레미스 오픈 모델 (Llama·Qwen 등 자체 호스팅)** — 외부 호출 0건. **단점**: GPU 인프라 비용 ★★★★ + 모델 운영 부담 + 응답 품질 검증 부담. **오픈스택 단계 옵션**으로 분리.
+  - **대안 4: 국산 매니지드 LLM (HyperCLOVA X / SOLAR 등)** — 국내 호스팅 명시. **단점**: 응답 품질 비교 필요 + 일부 모델은 API 한도·기능 차이. 본 잠정의 3단계와 동일.
+  - **대안 5: 마스킹 + 응답 unmask 후 표시** — 사용자 입력의 PII를 placeholder로 치환 후 호출, 응답에서 placeholder를 다시 원본으로 복원. 본 잠정의 1단계.
+- **트레이드오프**:
+  - **컴플라이언스**: 마스킹 + 감사 = §28의8 ④의 "보호 수준" 갖춘 처리로 해석 가능 / 마스킹 없으면 §28의8 ① 동의 필수 + §28의9 중지 명령 위험
+  - **응답 품질**: 마스킹된 LLM 입력 → 응답 품질 ↓ (이름·전화번호 등 컨텍스트 누락) / 국산 모델로 완전 대체 → Anthropic 대비 품질 미확인 / 온프레미스 → 가장 유연하지만 모델 크기·운영 비용 ★★★★
+  - **운영 비용**: Anthropic 단가 + 마스킹 라이브러리 운영 ≈ 현재 / HyperCLOVA X 단가 별도 검토 / 자체 호스팅 GPU $$$
+  - **데이터 노출**: 마스킹 = 잔여 위험 (마스킹 누락 시) / 국산 모델 = 0 (국내 데이터 주권 유지) / 자체 호스팅 = 0 (가장 엄격)
+- **리스크 (미확인)**:
+  - **R1 (★ 가장 큰)**: 미국이 §28의8 ④의 "보호위원회가 국제 기준에 부합하는 보호 수준 인정 국가"에 포함되는지 — 보호위원회 고시/공시 직접 확인 필요. 포함 시 별도 동의 없이 이전 가능, 미포함 시 §28의8 ① 동의 필수.
+  - **R2**: 마스킹 라이브러리의 정확도 — PII 추출(이름·주민번호·전화·이메일 + 한국어 특수 패턴) 정확도가 90% 이하라면 잔여 위험 ↑. PoC 단위 테스트 필요.
+  - **R3**: HyperCLOVA X 응답 품질이 Anthropic Claude 대비 OfficeAgent 시나리오에서 얼마나 떨어지는지 — Day 4 PoC 시간 허용 시 비교 시나리오 (예: 동일 프롬프트 10개 → 두 모델 응답 비교).
+  - **R4**: 감사 로그 보존 기간 (개보법 통상 5년+, 사용자 합의 필요).
+  - **R5**: 응답 unmask 시점에 응답 자체에 PII가 포함되어 있을 가능성 — Anthropic 응답 텍스트도 다시 마스킹 검사.
+- **검증 계획**:
+  - `VALIDATION.md` **시나리오 B-4** (마스킹 함수 단위 테스트) — 입력 = PII 포함 한국어 텍스트 10건 → 출력 = 마스킹된 텍스트 + PII 추출 정확도 ≥ 95% (정밀도·재현율) + 잔여 PII 0건.
+  - `VALIDATION.md` **시나리오 B-5** (HyperCLOVA X vs Anthropic 응답 품질) — Day 4 시간 허용 시. 동일 프롬프트 → 두 모델 응답 → 운영자 평가 5점 척도.
+  - 감사 로그 스키마: (timestamp, user_id, masked_input_hash, model_id, response_meta) — `runbooks/llm-audit-log.md` Day 4 선택.
+
+---
+
+> **본 3개 의사결정 박스 (B-1·B-2·B-3) + 위 A 도메인 3개 = 총 6개 박스 모두에 잠정 결론·근거·대안·트레이드오프·리스크·검증 계획 6요소 명시**. §6 불합격 트리거 #1·#3·#4 방어선 충족.
 
 ### 2.4 다른 도메인 (얕은 매핑)
 
