@@ -1,0 +1,25 @@
+# AWS root module — 변수 placeholder
+#
+# 자격증명은 환경변수(AWS_PROFILE / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) 또는 IAM Role.
+# 본 파일은 비-자격증명 변수만 박제. terraform.tfvars로 복사 후 채워 사용 (gitignore 대상).
+
+region = "ap-northeast-2"
+
+service_name = "officeagent"
+environment  = "prod"
+vpc_cidr     = "10.0.0.0/16"
+
+zone_cidrs = {
+  public      = "10.0.10.0/24"
+  private_app = "10.0.20.0/24"
+  private_db  = "10.0.30.0/24"
+  external    = "10.0.40.0/24"
+  management  = "10.0.100.0/24"
+}
+
+common_tags = {
+  project    = "officeagent"
+  managed_by = "terraform"
+  csap_tier  = "n/a"  # AWS 현행은 CSAP 대상 아님
+  owner      = "<team-or-owner-id>"
+}

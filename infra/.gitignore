@@ -1,0 +1,23 @@
+# Terraform 작업 자체에서 발생하는 산출물 — 절대 커밋 금지
+
+# 실 자격증명
+**/terraform.tfvars
+**/*.auto.tfvars
+
+# 상태 파일 (실 apply 시 생성, 본 PoC는 없음)
+**/*.tfstate
+**/*.tfstate.*
+**/.terraform.tfstate.lock.info
+
+# Provider 캐시
+**/.terraform/
+
+# Plan 산출물 (validate 산출은 validation-artifacts/에 별도)
+**/plan.tfplan
+**/*.tfplan
+
+# 보안 키
+**/*.pem
+**/*.key
+
+# 본 PoC는 실 apply 없음 — backup/log/crash 산출물 없음
