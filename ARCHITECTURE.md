@@ -1,95 +1,57 @@
-# 추상화 설계 — OfficeAgent 멀티 환경 배포
+# 추상화 설계 — OfficeAgent 멀티 환경
 
-> [`MIGRATION_PLAN.md`](./MIGRATION_PLAN.md)가 "무엇을·언제·왜 옮기는가"라면, 본 문서는 "어떻게 한 애플리케이션을 여러 환경에 배포 가능하도록 추상화할 것인가"를 다룬다.
+> [`MIGRATION_PLAN.md`](./MIGRATION_PLAN.md)가 "**무엇을·언제·왜**"라면, 본 문서는 "**어떻게 추상화하면 같은 앱이 AWS·NHN·오픈스택에 배포되는가**". 깊이 도메인 A·B 중심.
 
 ---
 
 ## 1. 추상화 목표
 
-OfficeAgent를 AWS·NHN·오픈스택 세 환경에서 운영 가능하도록 코드·인프라·배포 구조를 분리한다.
+단일 OfficeAgent 코드베이스를 **공통(provider-neutral) + 환경별 어댑터**로 분리해, 배포 환경(=고객 규제 등급)에 따라 어댑터만 교체한다.
 
-| 영역 | 정의 | 본 과제 범위 |
-|------|------|------------|
-| **공통 (provider-neutral)** | 어디서 돌려도 동일하게 작동하는 부분 | 1차 우선 |
-| **AWS-only** | AWS 매니지드 자원에 종속된 정의 (현행 유지) | 1차 우선 |
-| **NHN-only** | NHN 매니지드 자원에 종속된 정의 (신규 추가) | 1차 우선 |
-| **오픈스택-only** | OpenStack 자체 구축 시 재작성 필요 (장기 로드맵) | NHN-only 종속 식별까지만 |
+- **공통 (provider-neutral)** — OfficeAgent 컨테이너 이미지(12-factor), 비즈니스 로직, 환경변수 설정, **추상화 인터페이스(포트)**: 네트워크·DB·오브젝트·캐시·키관리·관측·LLM 게이트웨이. 코드는 이 포트에만 의존한다.
+- **AWS-only** — 현행 상용. ECS Fargate·RDS·S3·KMS·CloudWatch 어댑터.
+- **NHN-only** — CSAP 중등급. NKS·RDS for PostgreSQL·Object Storage·Secure Key Manager·Log&Crash 어댑터.
+- **오픈스택-only** — CSAP 상등급·폐쇄망. Nova/Magnum·PG 직접·Swift·Vault·Prometheus 스택 어댑터.
+
+**핵심 원칙**: 앱은 "S3"를 부르지 않고 "오브젝트 스토리지 포트"를 부른다. 포트 뒤의 구현(S3 SDK / NHN S3호환 / Swift s3api)이 환경별 어댑터다. S3 호환 API 덕에 AWS·NHN은 같은 어댑터를 공유할 수 있고, 오픈스택만 op 차이를 흡수하는 별도 어댑터가 필요하다.
 
 ---
 
 ## 2. 다이어그램
 
-### 2.1 4영역 분리도
+### 2.1 영역 분리도
 
-```mermaid
-graph TB
-    subgraph 공통["🟢 공통 (provider-neutral)"]
-        APP[OfficeAgent 컨테이너 이미지<br/>FastAPI Backend]
-        K8S[K8s 매니페스트<br/>Deployment / Service / Ingress]
-        ENV[12-factor 환경변수<br/>설정 분리]
-        HELM[Helm 차트 / Kustomize overlay]
-        MASK[LLM 마스킹 라이브러리<br/>※ B-3 의사결정 후 분기]
-    end
+> **정식 산출물: [`assets/architecture-layers.drawio`](./assets/architecture-layers.drawio)** (draw.io). 4영역을 색으로 구분 — 공통(녹색) / AWS-only(주황) / NHN-only(노랑) / 오픈스택-only(파랑). 기능 슬롯 9개(네트워크·LB·컴퓨트·DB·오브젝트·캐시·키관리·관측·자격)를 행으로, 3환경을 열로 매핑하고, CSAP 등급·LLM 데이터 주권 콜아웃 포함.
 
-    subgraph AWS["🟠 AWS-only (현행)"]
-        FARGATE[ECS Fargate Task]
-        ALB[ALB Target Group]
-        AWSIAM[IAM Role + Trust Policy]
-        CW[CloudWatch Logs + Metrics + X-Ray]
-        GHAA[GitHub Actions ECS deploy]
-    end
+drawio를 열 수 없는 환경을 위한 텍스트 요약:
 
-    subgraph NHN["🟡 NHN-only (신규)"]
-        NKS[NKS 클러스터<br/>+ Node Pool]
-        NHNLB[NHN Load Balancer]
-        NHNIAM[NHN IAM User + Role]
-        NHNLOG[NHN Log & Crash<br/>+ Monitoring]
-        NHNRDS[(NHN RDS for PG)]
-        NHNOBS[NHN Object Storage]
-        NHNKMS[NHN Secure Key Manager]
-    end
-
-    subgraph OS["🔵 오픈스택-only (장기)"]
-        KEYSTONE[Keystone 인증]
-        PATRONI[Patroni PG HA]
-        SWIFT[Swift 객체 스토리지]
-        OCTAVIA[Octavia / HAProxy]
-        BARBICAN[Barbican KMS]
-        PROM[Prometheus + Grafana + Loki]
-    end
-
-    APP --> K8S
-    K8S -. 재사용 .-> FARGATE
-    K8S --> NKS
-    K8S -. 재사용 장기 .-> OS
-    MASK -. LLM 호출 전 .-> APP
-
-    classDef common fill:#d4edda,stroke:#28a745,color:#155724
-    classDef aws fill:#ffe5d0,stroke:#fd7e14,color:#7a3a00
-    classDef nhn fill:#fff3cd,stroke:#ffc107,color:#856404
-    classDef os fill:#d1ecf1,stroke:#17a2b8,color:#0c5460
-
-    class APP,K8S,ENV,HELM,MASK common
-    class FARGATE,ALB,AWSIAM,CW,GHAA aws
-    class NKS,NHNLB,NHNIAM,NHNLOG,NHNRDS,NHNOBS,NHNKMS nhn
-    class KEYSTONE,PATRONI,SWIFT,OCTAVIA,BARBICAN,PROM os
 ```
+[공통/녹색]  OfficeAgent 컨테이너 이미지 · 12-factor 설정 · 추상화 포트(네트워크/DB/오브젝트/캐시/키/관측/LLM게이트웨이)
+                    │ (환경별 어댑터로 주입)
+   ┌────────────────┼─────────────────────────────┐
+[AWS-only/주황]  [NHN-only/노랑]            [오픈스택-only/파랑]
+ ECS Fargate     NKS/NCS+NCR               Nova+Magnum/외부K8s
+ RDS PG          RDS for PG (pg_dump)      Trove/Nova+Cinder 직접
+ S3              Object Storage (S3호환)    Swift+s3api
+ ElastiCache     EasyCache (영속성X)        Nova VM Redis
+ KMS/SecretsMgr  ★Secure Key Manager       Vault/Barbican
+ CloudWatch      ★Log&Crash+Monitoring     Prometheus/Grafana/Loki
+ IAM             NHN 멤버권한               Keystone
+```
+`★` = NHN-only 종속(오픈스택 단계 재작성 대상, §4).
 
-### 2.2 같은 컴포넌트가 환경별로 다르게 보이는 지점
+### 2.2 같은 애플리케이션이 환경별로 다르게 보이는 지점
 
-| 컴포넌트 | AWS | NHN | 오픈스택 (장기) |
-|----------|-----|-----|---------------|
-| 컨테이너 오케스트레이션 | ECS Fargate Task | NKS + Deployment | Magnum + kubespray |
-| 로드밸런서 | ALB Target Group | NHN LB | Octavia / HAProxy keepalived |
-| 매니지드 DB | RDS Multi-AZ | NHN RDS for PostgreSQL | Patroni + etcd 자체 HA |
-| 객체 스토리지 | S3 (네이티브) | NHN Object Storage (S3 호환 API 추정, Day 2 검증) | Swift (S3 호환 모드 가능) |
-| 키 관리 | Secrets Manager | NHN Secure Key Manager | Barbican (+ HSM 옵션) |
-| IAM | AWS IAM (Role + Trust Policy + Service-linked) | NHN IAM (User + Role) — **Trust Policy 직접 등가 없음** | Keystone (LDAP/AD 연동) |
-| 로그·메트릭 | CloudWatch + X-Ray | NHN Log & Crash + Monitoring | ELK + Prometheus + Grafana + Loki |
-| 알람·통보 | CW Alarm → SNS → Slack | NHN Monitoring → ? (Day 4 보강) → Slack | Alertmanager → Slack |
-| 시크릿 주입 (런타임) | Task Role + Secrets Manager 자동 주입 | Pod ServiceAccount + Secret manifest (Secure Key Manager 동기 필요) | ServiceAccount + Vault sidecar |
+| 추상화 포트 | AWS | NHN | 오픈스택 | 공통(앱이 보는 것) |
+|------------|-----|-----|---------|-------------------|
+| 오브젝트 스토리지 | S3 SDK | NHN S3호환(엔드포인트만 변경) | Swift s3api(op 차이 흡수) | `put/get/presign(bucket,key)` |
+| DB 연결 | RDS 엔드포인트 | NHN RDS 엔드포인트 | 자체 PG 엔드포인트 | `DATABASE_URL` (env) |
+| 캐시 | ElastiCache | EasyCache(영속성 없음 → 캐시 전용) | VM Redis | `REDIS_URL` (env) |
+| 키/시크릿 | KMS/Secrets Manager | Secure Key Manager(IP/MAC/인증서) | Vault | `secret.get(name)` 포트 |
+| 관측 | CloudWatch | Log&Crash + Monitoring | Prometheus/Loki | 구조화 로그(stdout) + OTLP |
+| **LLM 호출** | 국외 직접 | **마스킹 게이트 경유** | **온프레미스/국내 모델** | `llm.complete(prompt)` 포트 |
 
-→ 같은 K8s manifest를 4영역 모두에 적용 가능하지만, **secrets·LB·DB connection string·IAM identity는 환경별 분리** 필수. 이를 Kustomize overlay 또는 Helm values로 분리.
+> 가장 중요한 추상화는 **LLM 게이트웨이 포트**다. 앱은 `llm.complete()`만 부르고, 환경별 어댑터가 (AWS=직접 / NHN=PII 마스킹 후 국외 / 오픈스택=온프레미스 모델) 데이터 주권 정책을 구현한다. 이 한 포트가 §B-4 난제를 코드 변경 없이 환경별로 흡수한다.
 
 ---
 
@@ -97,137 +59,85 @@ graph TB
 
 ### 3.1 IaC 도구 선택
 
-**채택 (잠정)**: **Terraform** + AWS · NHN · OpenStack 멀티 프로바이더
+**채택: Terraform** (클라우드 계정 없이 `validate`/`plan -refresh=false`까지만, 실 apply 없음).
 
-**근거**:
-- AWS 공식 Provider (`hashicorp/aws`) — 성숙도 최상
-- NHN Cloud Provider (`nhncloud/nhncloud`) — 공식 지원, Day 4에 커버리지 직접 확인
-- OpenStack Provider (`terraform-provider-openstack/openstack`) — 표준
-- 세 환경 모두 같은 HCL 문법으로 다룰 수 있음 → 추상화 시그널 명확
+- **왜 Terraform인가**: AWS·NHN·OpenStack **세 provider를 한 도구로** 다룸(`hashicorp/aws`, `nhncloud/nhncloud`, `terraform-provider-openstack/openstack`). 모듈+변수로 공통/환경별 분리가 자연스러움. 검증 명령(`fmt`/`validate`/`plan`)이 산출물이 되어 §1.3 검증 점수 근거.
+- **다른 후보와 단점 비교**:
+  - **OpenTofu**: Terraform과 거의 동일(포크). NHN provider 호환성 검증 부담만 추가 → 보수적으로 Terraform.
+  - **Pulumi**: 범용 언어(TS/Python) 장점이나 본 과제는 선언적 매핑이 핵심이라 학습비용 대비 이득 작음.
+  - **Crossplane**: K8s 컨트롤 플레인 전제 → 오픈스택 폐쇄망 부트스트랩에 과함.
+  - **Ansible**: 절차적 — 네트워크/스토리지 선언적 매핑 표현에 덜 적합. 단 오픈스택 OS 레벨 구성엔 보완재로 유용.
 
-**대안 후보 + 단점**:
-
-| 대안 | 단점 |
-|------|------|
-| OpenTofu | Terraform fork (라이선스 자유). NHN Provider 호환성 미확인 → 본 일정엔 보수적 |
-| Pulumi | 코드 친화적이지만 본인 학습 곡선 ↑. Track C 시그널보다 부담이 큼 |
-| Crossplane | K8s native, 매력적. 다만 NHN Provider 미존재 추정. 학습 곡선 ↑ |
-| Ansible | 명령형 + 멀티 클라우드 추상화 시그널 약함 (idempotent 약함) |
-| IaC 없음 (다이어그램·문서만) | PRD §1.3 동등 평가지만 추상화 점수(20%) 약점 |
-
-→ Day 4에 Terraform skeleton 시간 배분. 부담 시 `terraform validate`만 통과시키고 문서형 검증으로 보강 (PRD §1.3 명시).
-
-### 3.2 모듈 구조 (Terraform 채택 시)
+### 3.2 모듈 구조 (skeleton — 선택 산출물 `infra/`)
 
 ```
 infra/
-├── modules/                        # 추상 모듈 (provider 분기 없는 인터페이스)
-│   ├── network/
-│   │   ├── variables.tf            # cidr_block, subnet_count, az_count
-│   │   ├── outputs.tf              # vpc_id, public_subnet_ids, private_subnet_ids
-│   │   └── main.tf                 # provider별 root에서 wrapping
-│   ├── compute/
-│   │   ├── variables.tf            # node_count, instance_type, image_id
-│   │   └── outputs.tf
-│   ├── database/
-│   │   ├── variables.tf            # engine_version, instance_class, multi_az
-│   │   └── outputs.tf
-│   └── storage/
-│       ├── variables.tf            # bucket_name, lifecycle_days
-│       └── outputs.tf
-├── aws/                            # AWS root module
-│   ├── main.tf                     # provider aws + VPC + ECS + RDS + S3
-│   ├── network.tf
-│   ├── compute.tf
-│   ├── database.tf
-│   └── outputs.tf
-├── nhn/                            # NHN root module
-│   ├── main.tf                     # provider nhncloud + 동등 자원
-│   ├── network.tf
-│   ├── compute.tf                  # NKS
-│   ├── database.tf                 # NHN RDS for PG
-│   ├── storage.tf                  # NHN OBS
-│   └── outputs.tf
-└── openstack/                      # OpenStack root module (장기, skeleton만)
-    ├── main.tf
-    └── outputs.tf
+├── modules/
+│   ├── network/     # VPC/Subnet/SG 추상 — NHN VPC ↔ OpenStack Neutron 변수화
+│   ├── data/        # DB·오브젝트·캐시 포트
+│   └── secrets/     # 키관리 포트
+├── aws/             # AWS root module (현행 참조)
+├── nhn/             # NHN root module (중등급)
+└── openstack/       # OpenStack root module (상등급·폐쇄망)
 ```
+
+> 실 apply 없이 `terraform validate` + `plan -refresh=false`로 모듈이 환경별로 분기됨을 입증한다(VALIDATION A 시나리오).
 
 ### 3.3 변수·환경 분리 전략
 
-- **공통 변수**: `service_name = "officeagent"`, `environment`(dev/stage/prod), `tags`(공통 라벨)
-- **AWS-only 변수**: `aws_account_id`, `aws_region = "ap-northeast-2"`, `vpc_cidr = "10.0.0.0/16"`
-- **NHN-only 변수**: `nhn_user_id`, `nhn_password`, `nhn_region`(공공 전용 리전), `nhn_project_id`, `nhn_vpc_cidr`
-- **오픈스택-only 변수**: `os_auth_url`, `os_username`, `os_project_name`, `os_domain_name`
-- **시크릿·자격증명**:
-  - AWS: AWS Secrets Manager (현행)
-  - NHN: NHN Secure Key Manager
-  - Terraform 실행 자격증명: 로컬 환경변수 (`AWS_PROFILE`, `OS_CLOUD`) + `terraform.tfvars`는 gitignore
-  - 본 과제 범위 = 실 apply 없음 → placeholder 값 + `.tfvars.example`만 (PRD §3 명시)
+- **공통 변수**: 앱 이미지 태그, 포트, 리소스 사이징(CPU/메모리), 도메인.
+- **NHN-only 변수**: 공공 전용 리전, Object Storage 엔드포인트(`kr1-api-object-storage...`), Secure Key Manager appkey, NKS 버전.
+- **오픈스택-only 변수**: Keystone auth URL, 폐쇄망 내부 미러/프록시 엔드포인트, Octavia flavor, Swift 컨테이너.
+- **시크릿·자격증명**: 코드/tfstate에 평문 금지. 환경변수·Vault/Secure Key Manager 주입. tfvars는 `*.tfvars.example`만 커밋, 실값 gitignore.
 
 ---
 
-## 4. NHN-only 종속의 솔직한 식별
+## 4. NHN-only 종속의 솔직한 식별 (추상화 사고의 핵심 시그널)
 
-> **추상화 사고의 핵심 시그널 (PRD §4 평가 20%)**. 오픈스택 단계에서 재작성 필요한 부분을 미리 식별. `MIGRATION_PLAN §3.2`와 동기 유지.
+| 영역 | NHN-only 의존 | 오픈스택 대안 | 재작성 비용 |
+|------|---------------|---------------|------------|
+| **키 관리** | Secure Key Manager (IP/MAC/인증서 인증, NHN 전용 API) | Vault(권장) 또는 Barbican+HSM | **높음** — 키 추상화 포트 어댑터 신규 + HA 설계 |
+| **관측** | Log&Crash Search + NHN Monitoring (로그/메트릭 분리) | Prometheus+Grafana+Loki 자체 | **높음** — 수집 파이프라인 전면 구축 |
+| **관리형 K8s** | NKS/NCS (컨트롤플레인 매니지드) | 외부 K8s(Cluster API/kubeadm) on Nova | 중 — 클러스터 라이프사이클 자체 운영 |
+| **관리형 DB** | RDS for PostgreSQL (백업/HA 매니지드) | Trove(미성숙) 또는 PG 직접 + 자체 백업 | **높음** — 무손실·복구·HA 자체 보장 |
+| **로드밸런서** | NHN LB (매니지드) | Octavia (amphora=VM per LB) | 중 — 관리망·이미지·failover 운영 |
+| **NAT/외부연결** | NAT Gateway (매니지드) | Neutron Router | 낮음 — 개념 동일 |
+| **오브젝트** | Object Storage(S3호환) | Swift+s3api(에뮬레이션) | 중 — op별 호환성 대조 |
+| 컨테이너 이미지·비즈니스 로직 | (종속 없음) | 그대로 재사용 | **없음 (공통)** |
 
-| 영역 | NHN-only 의존 | 오픈스택 대안 | 재작성 비용 | 비고 |
-|------|-------------|------------|----------|------|
-| DB | NHN RDS for PG (매니지드 backup·HA·monitoring) | PostgreSQL + Patroni + etcd | ★★★★ | failover 자동화 직접 구축 |
-| 객체 스토리지 | NHN OBS (S3 호환 API 추정) | Swift (S3 호환 모드 가능) | ★★★ | 다중 노드 + replica 직접 |
-| 키 관리 | NHN Secure Key Manager (자동 회전 + 감사 로그) | Barbican (+ HSM 옵션) | ★★★★ | HSM 도입 시 ★★★★★ |
-| IAM·인증 | NHN IAM (User + Role) | Keystone (LDAP/AD 연동) | ★★★ | 사용자·그룹·정책 매핑 |
-| 로드밸런서 | NHN LB (자동 failover + 헬스체크) | Octavia 또는 HAProxy keepalived | ★★★ | HA 직접 운영 |
-| K8s | NKS (cluster 라이프사이클 매니지드) | Magnum + kubespray | ★★★★ | upgrade·node pool 운영 직접 |
-| 로그·메트릭 | NHN Log & Crash + Monitoring | ELK + Prometheus + Grafana + Loki | ★★ | 잘 알려진 스택, 부담 적음 |
-| 알람 라우팅 | NHN Monitoring → ? → Slack | Alertmanager → Slack | ★★ | 룰 규칙만 재정의 |
-
-**재작성 비용 ★ 기준**:
-- ★ = 설정만 (1주 미만)
-- ★★ = 도구 교체 + 룰 재정의 (1~3주)
-- ★★★ = 자체 운영 도구 도입 + 동등 기능 구성 (1~2개월)
-- ★★★★ = HA·복구·감사 등 운영 영역 직접 구축 (2~4개월)
-- ★★★★★ = 외부 의존 (HSM·전용 라이센스) 도입 비용 ↑↑
+> **읽는 법**: "재작성 비용 높음"이 많을수록 오픈스택 전환이 비싸다. 그래서 키관리·관측·DB를 **포트로 추상화**해 두는 것이 NHN 단계의 투자다(§1). 이 표가 멀티 환경 추상화 평가(20%)의 직접 증거.
 
 ---
 
-## 5. 운영 자동화 · AIOps 통합 지점 (선택)
+## 5. 운영 자동화·AIOps 통합 지점 (선택 — 미구현)
 
-본 과제 §1.3 검증 산출물의 선택 근거 보강 가능 (Day 4·5 시간 허용 시 `runbooks/`에 PoC). 본 1차 작성 단계에선 후보 지점만 명시.
+본 과제 범위에서는 설계만. LLM이 운영 루프에 들어가는 후보 지점(향후 PoC):
+- **알람 진단**: NHN Monitoring/CloudWatch 알람 → LLM이 로그·메트릭 수집·요약 → 운영자에게 가설 제시.
+- **드리프트 비교**: `terraform plan` diff → LLM이 의도치 않은 변경 설명.
+- **비용 이상치**: 비용 메트릭 → LLM 이상 감지.
 
-| 통합 지점 | LLM 호출 입력 | 출력 | 의사결정 위치 |
-|----------|------------|----|-----------|
-| 알람 진단 | NHN Monitoring 알람 페이로드 + 최근 로그 (마스킹) | 가능한 원인 + 1차 대응 명령 | 운영자 (휴먼 인 더 루프) |
-| 드리프트 비교 | `terraform plan` 결과 + 이전 plan | 의미 있는 변경 요약 + 위험도 | 운영자 (자동 alert) |
-| 비용 이상치 | 일일 비용 메트릭 (NHN + AWS) | 평소 대비 변화 + 추정 원인 | 운영자 (주간 리포트) |
-
-각 통합 지점에서 **LLM 호출 데이터에 민감 정보 포함 가능성** = 본 추상화의 핵심 보안 고려. B-3 의사결정과 동일 마스킹 라이브러리 재사용 (공통 영역, 다이어그램 §2.1의 `MASK` 노드).
+> ⚠️ 이 지점들 모두 **§B-4 데이터 주권 적용 대상** — 운영 로그에 PII가 있으면 마스킹 게이트 경유 필수.
 
 ---
 
-## 6. 가정 · 미확인 영역
+## 6. 가정·미확인 영역
 
 | 가정/미확인 | 영향 범위 | 리스크 | 검증 계획 |
-|-----------|---------|------|---------|
-| NHN Terraform Provider resource 커버리지 | IaC 채택 가능성 | 신규 NHN 서비스 자원 미지원 시 일부는 manual + Terraform 혼합 | Day 4: `registry.terraform.io/providers/nhncloud/nhncloud` 직접 확인 |
-| **NKS의 CSAP 중등급 보유 여부** | C 도메인 회피 설계 필요성 | 미인증이면 NHN Instance + 자체 K8s 또는 IaaS 직접 사용 | Day 2~3: NHN docs + 공공기관용 NHN docs 직접 확인 |
-| NHN OBS S3 호환 API 완전성 | B-2 sync 절차 단순성 | 부분 호환이면 NHN CLI 별도 사용 + 절차 분기 | Day 2~3: docs 직접 확인 + `aws s3 sync --dryrun` 시뮬레이션 |
-| NHN Monitoring → Slack 외부 통보 절차 | D 도메인 자동화 PoC | 직접 webhook 미지원이면 중계 람다 필요 | Day 4: NHN Monitoring docs 직접 확인 |
-| NHN 매니지드 서비스의 CSAP 인증 적용 범위 | 전체 설계 신뢰성 | 일부 서비스 미인증이면 회피 설계 필요 | Day 5: 공공기관용 NHN docs (`docs.gov-nhncloud.com`) SSL 우회 확인 |
-| OpenStack Magnum K8s 운영 부담 | 장기 로드맵 일정 | 자체 K8s 운영 비용 ↑↑ | 본 과제 범위 외 (장기 검토) |
+|------------|----------|--------|----------|
+| NHN provider(`nhncloud/nhncloud`) 성숙도·리소스 커버리지 | IaC skeleton 작성 가능 범위 | 일부 리소스 미지원 → 수동/콘솔 보완 | Terraform Registry provider 문서 + `validate` 시도 |
+| NHN RDS PG `wal_level=logical` 허용 여부 | B-1 무중단 대안 가능성 | 2차안 불가 → pg_dump만 | NHN 기술지원 문의 |
+| Swift s3api op별 호환성(presign·ACL) | 오브젝트 어댑터 정확도 | 앱 S3 호출 일부 실패 | `swiftstack/s3compat` op 대조 |
+| Secure Key Manager BYOK 범위 | 데이터 주권 키 통제 주장 | 주장 약화 | docs 정독/문의 |
+| WebFetch 차단 → 1차 자료 원문 미정독 | 인용 충실도 | Q&A 1차자료 축 | 캡처 단계 브라우저 직접 열람 |
 
 ---
 
 ## 7. 참고 자료
 
-§1차 자료 인용은 `MIGRATION_PLAN.md §8`과 동기. 본 문서 특화 자료:
-
-- Terraform NHN Cloud Provider — `registry.terraform.io/providers/nhncloud/nhncloud` (Day 4 직접 확인)
-- Terraform AWS Provider — `registry.terraform.io/providers/hashicorp/aws`
-- Terraform OpenStack Provider — `registry.terraform.io/providers/terraform-provider-openstack/openstack`
-- OpenStack 공식 docs — `docs.openstack.org` (Magnum / Keystone / Swift / Cinder / Neutron / Barbican / Octavia)
-- CNCF Cloud Native Trail Map — 멀티 클라우드 추상화 영감 (부록)
+- 1차 자료·신뢰도 표기는 [`MIGRATION_PLAN.md` §8](./MIGRATION_PLAN.md) 참조 (NHN docs / OpenStack docs / law.go.kr·CSAP 고시).
+- Terraform providers: `hashicorp/aws`, `nhncloud/nhncloud`, `terraform-provider-openstack/openstack` (Terraform Registry).
+- wiki/는 출발점일 뿐 — 본문 인용처 아님.
 
 ---
 
-_본 문서 v0.1 (2026-05-26 Day 2). §3.1 IaC 도구 채택은 잠정 — Day 4 NHN Provider 직접 확인 후 확정. §6 가정 6건은 Day 2~5에 누적 검증._
+_v1 (2026-06-17, 학습용). 다이어그램 정식본 = `assets/architecture-layers.drawio`. infra/ Terraform skeleton은 선택 산출물로 후속._

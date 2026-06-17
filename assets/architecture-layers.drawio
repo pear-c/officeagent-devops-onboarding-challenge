@@ -1,0 +1,145 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.6 Chrome/144.0.7559.236 Electron/40.8.4 Safari/537.36" version="29.6.6">
+  <diagram name="4영역 추상화" id="layers-1">
+    <mxGraphModel dx="1426" dy="889" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=center;verticalAlign=middle;" value="OfficeAgent 멀티 환경 추상화 — 공통 / AWS-only / NHN-only / 오픈스택-only" vertex="1">
+          <mxGeometry height="30" width="760" x="40" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="common" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontStyle=1;" value="공통 (환경 무관) — OfficeAgent 컨테이너 이미지 · 12-factor 설정(env) · 추상화 인터페이스(네트워크/DB/오브젝트/캐시/키/관측 포트)" vertex="1">
+          <mxGeometry height="48" width="760" x="40" y="60" as="geometry" />
+        </mxCell>
+        <mxCell id="h_cap" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontStyle=1;" value="기능 슬롯" vertex="1">
+          <mxGeometry height="32" width="150" x="40" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="h_aws" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontStyle=1;" value="AWS (현행 · 상용 유지)" vertex="1">
+          <mxGeometry height="32" width="190" x="190" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="h_nhn" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontStyle=1;" value="NHN (중등급 · 논리 망분리)" vertex="1">
+          <mxGeometry height="32" width="190" x="380" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="h_os" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontStyle=1;" value="오픈스택 (상등급 · 물리 망분리 · 폐쇄망)" vertex="1">
+          <mxGeometry height="32" width="230" x="570" y="120" as="geometry" />
+        </mxCell>
+        <mxCell id="r0c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="네트워크 (VPC/Subnet/SG)" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="156" as="geometry" />
+        </mxCell>
+        <mxCell id="r0a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="AWS VPC + SG" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="156" as="geometry" />
+        </mxCell>
+        <mxCell id="r0n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="NHN VPC + Security Group" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="156" as="geometry" />
+        </mxCell>
+        <mxCell id="r0o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Neutron (network/subnet/router/SG)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="156" as="geometry" />
+        </mxCell>
+        <mxCell id="r1c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="외부연결 · 로드밸런서" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="r1a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="NAT Gateway + ALB" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="r1n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="NAT Gateway + Load Balancer (L7 부분확인)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="r1o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Neutron Router + Octavia (amphora=VM per LB)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="204" as="geometry" />
+        </mxCell>
+        <mxCell id="r2c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="컴퓨트 · 컨테이너" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r2a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="ECS Fargate + ECR" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r2n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="NKS / NCS + NCR (Fargate와 1:1 아님)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r2o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Nova + Magnum 또는 외부 K8s (EKS 동급 관리형 아님)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="252" as="geometry" />
+        </mxCell>
+        <mxCell id="r3c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="데이터베이스" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="r3a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="RDS PostgreSQL (Multi-AZ)" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="r3n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="RDS for PostgreSQL (외부이전=pg_dump · DMS 미확인)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="r3o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Trove(PG 미성숙) 또는 Nova+Cinder에 PG 직접" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="300" as="geometry" />
+        </mxCell>
+        <mxCell id="r4c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="오브젝트 스토리지" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="348" as="geometry" />
+        </mxCell>
+        <mxCell id="r4a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="S3 (2 버킷)" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="348" as="geometry" />
+        </mxCell>
+        <mxCell id="r4n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="Object Storage (S3 호환 API → aws s3 sync)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="348" as="geometry" />
+        </mxCell>
+        <mxCell id="r4o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Swift + s3api 미들웨어 (에뮬레이션 · op 대조)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="348" as="geometry" />
+        </mxCell>
+        <mxCell id="r5c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="캐시 · 세션" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="r5a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="ElastiCache Redis" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="r5n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="EasyCache (Valkey/Redis · 영속성 미제공)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="r5o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Nova VM에 Redis 직접" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="396" as="geometry" />
+        </mxCell>
+        <mxCell id="r6c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="키 관리 · 시크릿" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="444" as="geometry" />
+        </mxCell>
+        <mxCell id="r6a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="KMS + Secrets Manager" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="444" as="geometry" />
+        </mxCell>
+        <mxCell id="r6n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontStyle=1;" value="★ Secure Key Manager (IP/MAC/인증서 통제)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="444" as="geometry" />
+        </mxCell>
+        <mxCell id="r6o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Vault 또는 Barbican (HSM/Vault 백엔드)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="444" as="geometry" />
+        </mxCell>
+        <mxCell id="r7c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="관측 (로그/메트릭)" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="492" as="geometry" />
+        </mxCell>
+        <mxCell id="r7a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="CloudWatch (로그+메트릭+알람 통합)" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="492" as="geometry" />
+        </mxCell>
+        <mxCell id="r7n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontStyle=1;" value="★ Log&amp;Crash Search + Monitoring (로그/메트릭 분리)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="492" as="geometry" />
+        </mxCell>
+        <mxCell id="r7o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Prometheus + Grafana + Loki (자체)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="492" as="geometry" />
+        </mxCell>
+        <mxCell id="r8c" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;" value="자격 · 권한" vertex="1">
+          <mxGeometry height="44" width="150" x="40" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="r8a" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;" value="IAM (Role/Policy JSON)" vertex="1">
+          <mxGeometry height="44" width="190" x="190" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="r8n" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;" value="NHN 멤버 권한 (모델 다름 → 재설계)" vertex="1">
+          <mxGeometry height="44" width="190" x="380" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="r8o" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" value="Keystone (domain/project/role)" vertex="1">
+          <mxGeometry height="44" width="230" x="570" y="540" as="geometry" />
+        </mxCell>
+        <mxCell id="note_star" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;align=left;spacingLeft=8;" value="★ = NHN-only 종속 → 오픈스택 단계 전면 재작성 대상 (키 관리 · 관측). 관리형 DB/LB/K8s도 △ 부분 재작성." vertex="1">
+          <mxGeometry height="34" width="760" x="40" y="600" as="geometry" />
+        </mxCell>
+        <mxCell id="note_csap" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;align=left;spacingLeft=8;" value="CSAP 등급이 망분리를 가른다 — 상등급=물리 망분리(퍼블릭 불가 → 오픈스택 필수) / 중·하등급=논리 망분리(NHN 가능). 법적근거: 개인정보보호법 시행령 §48의2 (2025-10-31 위험기반 전환)." vertex="1">
+          <mxGeometry height="44" width="760" x="40" y="642" as="geometry" />
+        </mxCell>
+        <mxCell id="note_llm" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;align=left;spacingLeft=8;" value="데이터 주권 핵심 — 국외 LLM 호출(Anthropic/OpenAI) = 개인정보보호법 §28의8(국외 이전, 동의+고지5종). 중등급=PII 마스킹 게이트+감사로그 / 상등급=온프레미스 LLM·국내모델(HyperCLOVA X) 강제. 이 경계가 공통 레이어에 끼우는 추상화 슬롯(LLM 게이트웨이)." vertex="1">
+          <mxGeometry height="52" width="760" x="40" y="694" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
