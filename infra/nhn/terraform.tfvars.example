@@ -1,0 +1,9 @@
+# 복사: cp terraform.tfvars.example terraform.tfvars  (terraform.tfvars 는 gitignore)
+# 자격증명(사용자/비밀번호)은 여기 적지 말고 환경변수로:
+#   export OS_USERNAME="..."  OS_PASSWORD="..."
+
+auth_url    = "https://api-identity-infrastructure.nhncloudservice.com/v2.0"  # 실제 값은 NHN docs 확인 [미확인]
+region      = "KR1"
+tenant_name = "your-nhn-project"
+public_cidr  = "10.0.0.0/24"
+private_cidr = "10.0.10.0/24"

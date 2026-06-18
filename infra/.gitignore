@@ -1,0 +1,13 @@
+# Terraform 상태·캐시·실값 — 커밋 금지
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# 실 변수값(자격증명 포함 가능) — example 만 커밋
+*.tfvars
+!*.tfvars.example
+
+# 검증 산출물(VALIDATION A-1)
+*.plan
+*.plan.json
